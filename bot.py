@@ -1,5 +1,7 @@
 import logging
 import asyncio
+import os
+from aiohttp import web
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -11,6 +13,21 @@ TOKEN = "8030107480:AAGUqoobi8j2UA4s3Ieu7JhfRl1ojA2TRx4"
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
+
+# --- Dummy Web Server for Render ---
+async def handle(request):
+    return web.Response(text="Bot is running!")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get("/", handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    # Render provides PORT environment variable
+    port = int(os.environ.get("PORT", 8080))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logging.info(f"Web server started on port {port}")
 
 class RestaurantStates(StatesGroup):
     waiting_for_menu_name = State()
@@ -47,12 +64,11 @@ async def go_home(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.answer("ዋና ሜኑ፦", reply_markup=main_menu(callback.from_user.id))
     await callback.answer()
 
-# --- ADMIN: ADD STAFF ---
 @dp.message(F.text == "👤 ሰራተኛ ጨምር")
 async def add_staff_start(message: types.Message, state: FSMContext):
     if not is_admin(message.from_user.id): return
     await state.set_state(RestaurantStates.waiting_for_staff_id)
-    await message.answer("ለመመዝገብ የሚፈልጉትን የሰራተኛ 'User ID' ያስገቡ (ለምሳሌ፦ 12345678)፦")
+    await message.answer("ለመመዝገብ የሚፈልጉትን የሰራተኛ 'User ID' ያስገቡ፦")
 
 @dp.message(RestaurantStates.waiting_for_staff_id)
 async def process_staff_id(message: types.Message, state: FSMContext):
@@ -61,9 +77,8 @@ async def process_staff_id(message: types.Message, state: FSMContext):
         add_user(s_id, 'staff')
         await message.answer(f"✅ ሰራተኛው (ID: {s_id}) በተሳካ ሁኔታ ተመዝግቧል!", reply_markup=main_menu(message.from_user.id))
         await state.clear()
-    except ValueError: await message.answer("እባክዎን ቁጥር ብቻ ያስገቡ!")
+    except ValueError: await message.answer("ቁጥር ብቻ ያስገቡ!")
 
-# --- INCOME (Sales) ---
 @dp.message(F.text == "💰 ገቢ መመዝገቢያ")
 async def income_menu(message: types.Message):
     if not is_staff(message.from_user.id): return
@@ -79,8 +94,6 @@ async def select_income_item(callback: types.CallbackQuery):
         buttons.append([InlineKeyboardButton(text="➕ አዲስ የሽያጭ ዝርዝር መዝግብ", callback_data=f"addmenu:{category}")])
     buttons.append([back_home_btn()])
     await callback.message.edit_text(f"የ{category} የሽያጭ ዝርዝር፦", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
-
-# ... [Keep the rest of income/expense logic, but check is_admin for addmenu/addexp/delete]
 
 @dp.callback_query(F.data.startswith("selinc:"))
 async def record_income_start(callback: types.CallbackQuery, state: FSMContext):
@@ -112,7 +125,7 @@ async def add_menu_start(callback: types.CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id): return
     await state.update_data(cat=callback.data.split(":")[1])
     await state.set_state(RestaurantStates.waiting_for_menu_name)
-    await callback.message.answer("የአዲሱ ሽያጭ ስም ያስገቡ (ለምሳሌ፦ ጥብስ)፦")
+    await callback.message.answer("የአዲሱ ሽያጭ ስም ያስገቡ፦")
 
 @dp.message(RestaurantStates.waiting_for_menu_name)
 async def add_menu_name(message: types.Message, state: FSMContext):
@@ -143,7 +156,7 @@ async def select_exp_item(callback: types.CallbackQuery):
     items = get_expense_items(category)
     buttons = [[InlineKeyboardButton(text=f"{item[0]} (ስቶር: {item[1]} {item[2]})", callback_data=f"selexp:{category}:{item[0]}:{item[2]}")] for item in items]
     if is_admin(callback.from_user.id):
-        buttons.append([InlineKeyboardButton(text="➕ አዲስ የወጪ/ስቶር ዝርዝር (ለምሳሌ፦ ጤፍ)", callback_data=f"addexp:{category}")])
+        buttons.append([InlineKeyboardButton(text="➕ አዲስ የወጪ/ስቶር ዝርዝር", callback_data=f"addexp:{category}")])
     buttons.append([back_home_btn()])
     await callback.message.edit_text(f"የ{category} የወጪ ዝርዝር፦", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
 
@@ -178,7 +191,7 @@ async def add_exp_start(callback: types.CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id): return
     await state.update_data(cat=callback.data.split(":")[1])
     await state.set_state(RestaurantStates.waiting_for_exp_item_name)
-    await callback.message.answer("የአዲሱ ወጪ እቃ ስም ያስገቡ (ለምሳሌ፦ ጤፍ)፦")
+    await callback.message.answer("የአዲሱ ወጪ እቃ ስም ያስገቡ፦")
 
 @dp.message(RestaurantStates.waiting_for_exp_item_name)
 async def add_exp_name(message: types.Message, state: FSMContext):
@@ -194,7 +207,7 @@ async def add_exp_unit(callback: types.CallbackQuery, state: FSMContext):
     add_expense_item(data['name'], data['cat'], unit)
     await state.update_data(item=data['name'], unit=unit)
     await state.set_state(RestaurantStates.waiting_for_exp_amount)
-    await callback.message.answer(f"✅ {data['name']} ተመዝግቧል። አሁን ለ{data['name']} የወጣውን ጠቅላላ ብር ያስገቡ፦")
+    await callback.message.answer(f"✅ {data['name']} ተመዝግቧል። ጠቅላላ ብር ያስገቡ፦")
 
 @dp.message(F.text == "🗑️ ሂሳብ ሰርዝ")
 async def show_recent_for_delete(message: types.Message):
@@ -203,21 +216,21 @@ async def show_recent_for_delete(message: types.Message):
     if not recent: await message.answer("ምንም የተመዘገበ ሂሳብ የለም።"); return
     buttons = [[InlineKeyboardButton(text=f"{'💰' if t[1] == 'income' else '💸'} {t[3]}: {t[4]} ብር ({t[7][11:16]})", callback_data=f"del:{t[0]}")] for t in recent]
     buttons.append([back_home_btn()])
-    await message.answer("🗑️ ለመሰረዝ የሚፈልጉትን ሂሳብ ይምረጡ፦", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    await message.answer("🗑️ ለመሰረዝ ይምረጡ፦", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
 
 @dp.callback_query(F.data.startswith("del:"))
 async def delete_item(callback: types.CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id): return
     delete_transaction(callback.data.split(":")[1])
     await callback.answer("✅ ሂሳቡ ተሰርዟል!")
-    await callback.message.edit_text("✅ ሂሳቡ በተሳካ ሁኔታ ተሰርዟል።")
+    await callback.message.edit_text("✅ ሂሳቡ ተሰርዟል።")
     await asyncio.sleep(1)
     await go_home(callback, state)
 
 @dp.message(F.text == "📦 ስቶር/ዝርዝር")
 async def view_store(message: types.Message):
     if not is_admin(message.from_user.id): return
-    msg = "📦 አሁን ያለው ስቶር (Inventory)፦\n\n"
+    msg = "📦 አሁን ያለው ስቶር፦\n\n"
     for cat in ["መጠጥ", "ሻይ ቡና", "ምግብ"]:
         items = get_expense_items(cat); msg += f"🔹 **{cat}**፦\n"
         for n, q, u in items: msg += f"   - {n}: {q} {u}\n"
@@ -234,14 +247,14 @@ async def report_period_menu(message: types.Message):
 @dp.callback_query(F.data.startswith("repper:"))
 async def report_type_menu(callback: types.CallbackQuery):
     period = callback.data.split(":")[1]
-    builder = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🍲 የምግብ ብቻ", callback_data=f"reptype:{period}:ምግብ")],[InlineKeyboardButton(text="🍺 የመጠጥ ብቻ", callback_data=f"reptype:{period}:መጠጥ")],[InlineKeyboardButton(text="☕ የሻይ ቡና ብቻ", callback_data=f"reptype:{period}:ሻይ ቡና")],[InlineKeyboardButton(text="📊 ሁሉንም", callback_data=f"reptype:{period}:ALL")],[back_home_btn()]])
+    builder = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🍲 ምግብ", callback_data=f"reptype:{period}:ምግብ")],[InlineKeyboardButton(text="🍺 መጠጥ", callback_data=f"reptype:{period}:መጠጥ")],[InlineKeyboardButton(text="☕ ሻይ ቡና", callback_data=f"reptype:{period}:ሻይ ቡና")],[InlineKeyboardButton(text="📊 ሁሉንም", callback_data=f"reptype:{period}:ALL")],[back_home_btn()]])
     await callback.message.edit_text("የሪፖርት አይነት ይምረጡ፦", reply_markup=builder)
 
 @dp.callback_query(F.data.startswith("reptype:"))
 async def show_final_report(callback: types.CallbackQuery):
     _, period, r_type = callback.data.split(":")
     data = get_detailed_report(period)
-    msg = f"📊 ዝርዝር ሪፖርት ({r_type})\n\n"
+    msg = f"📊 ሪፖርት ({r_type})\n\n"
     total_inc, total_exp = 0, 0
     days_data = {}
     for t_type, cat, name, amount, qty, unit, day in data:
@@ -268,5 +281,10 @@ async def show_final_report(callback: types.CallbackQuery):
     else: msg += f"💰 **ጠቅላላ ትርፍ፦ {total_inc - total_exp} ብር**"
     await callback.message.answer(msg)
 
-async def main(): await dp.start_polling(bot)
-if __name__ == "__main__": asyncio.run(main())
+async def main():
+    init_db()
+    # Start web server and polling together
+    await asyncio.gather(start_web_server(), dp.start_polling(bot))
+
+if __name__ == "__main__":
+    asyncio.run(main())
